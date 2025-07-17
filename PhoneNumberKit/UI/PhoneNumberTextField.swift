@@ -15,7 +15,9 @@ import UIKit
 open class PhoneNumberTextField: UITextField, UITextFieldDelegate {
     public let utility: PhoneNumberUtility
 
-    public lazy var flagButton = UIButton()
+    public lazy var flagGestureRecognizerStackView = UIStackView()
+    public lazy var flagGestureRecognizer = UITapGestureRecognizer()
+    private var didSetFlagGestureRecognizerTarget = false
 
     /// Override setText so number will be automatically formatted when setting text by code
     override open var text: String? {
@@ -77,9 +79,31 @@ open class PhoneNumberTextField: UITextField, UITextFieldDelegate {
 
     public var withFlag: Bool = false {
         didSet {
-            leftView = self.withFlag ? self.flagButton : nil
-            leftViewMode = self.withFlag ? .always : .never
-            self.updateFlag()
+            UIView.performWithoutAnimation {
+                if self.withFlag {
+                    let buttonAndDividerStackView = UIStackView()
+                    buttonAndDividerStackView.axis = .horizontal
+                    buttonAndDividerStackView.spacing = 8
+                    buttonAndDividerStackView.addArrangedSubview(self.flagGestureRecognizerStackView)
+                    let dividerView = UIView()
+                    dividerView.translatesAutoresizingMaskIntoConstraints = false
+                    dividerView.heightAnchor.constraint(equalToConstant: 24).isActive = true
+                    dividerView.widthAnchor.constraint(equalToConstant: 1).isActive = true
+                    dividerView.backgroundColor = UIColor(red: 228/255, green: 228/255, blue: 235/255, alpha: 1)
+                    buttonAndDividerStackView.addArrangedSubview(dividerView)
+                    
+                    let spacerView = UIView()
+                    buttonAndDividerStackView.addArrangedSubview(spacerView)
+                    spacerView.heightAnchor.constraint(equalTo: self.flagGestureRecognizerStackView.heightAnchor, multiplier: 1.0).isActive = true
+                    spacerView.widthAnchor.constraint(equalToConstant: 0).isActive = true
+                    
+                    leftView = buttonAndDividerStackView
+                } else {
+                    leftView = nil
+                }
+                leftViewMode = self.withFlag ? .always : .never
+                self.updateFlag()
+            }
         }
     }
 
@@ -123,8 +147,11 @@ open class PhoneNumberTextField: UITextField, UITextFieldDelegate {
 
     private var _withDefaultPickerUI: Bool = false {
         didSet {
-            if flagButton.actions(forTarget: self, forControlEvent: .touchUpInside) == nil {
-                flagButton.addTarget(self, action: #selector(didPressFlagButton), for: .touchUpInside)
+            if !didSetFlagGestureRecognizerTarget {
+                flagGestureRecognizer.addTarget(self, action: #selector(didPressFlagButton))
+                flagGestureRecognizerStackView.addGestureRecognizer(flagGestureRecognizer)
+                flagGestureRecognizerStackView.isUserInteractionEnabled = true
+                didSetFlagGestureRecognizerTarget = true
             }
         }
     }
@@ -206,8 +233,8 @@ open class PhoneNumberTextField: UITextField, UITextFieldDelegate {
 
     override open func layoutSubviews() {
         if self.withFlag { // update the width of the flagButton automatically, iOS <13 doesn't handle this for you
-            let width = self.flagButton.systemLayoutSizeFitting(bounds.size).width
-            self.flagButton.frame.size.width = width
+            let width = self.flagGestureRecognizerStackView.systemLayoutSizeFitting(bounds.size).width
+            self.flagGestureRecognizerStackView.frame.size.width = width
         }
         super.layoutSubviews()
     }
@@ -297,6 +324,10 @@ open class PhoneNumberTextField: UITextField, UITextFieldDelegate {
 
     open func updateFlag() {
         guard self.withFlag else { return }
+        
+        flagGestureRecognizerStackView.subviews.forEach { subview in
+            subview.removeFromSuperview()
+        }
 
         if let phoneNumber = phoneNumber,
            let regionCode = phoneNumber.regionID,
@@ -314,21 +345,48 @@ open class PhoneNumberTextField: UITextField, UITextFieldDelegate {
             .compactMap { UnicodeScalar(flagBase + $0.value)?.description }
             .joined()
 
-        self.flagButton.setTitle(flag + " ", for: .normal)
-        self.flagButton.accessibilityLabel = NSLocalizedString(
+        flagGestureRecognizerStackView.axis = .horizontal
+        flagGestureRecognizerStackView.spacing = 8
+        let flagLabel = UILabel()
+        let fontSize = (font ?? UIFont.preferredFont(forTextStyle: .body)).pointSize
+        flagLabel.font = UIFont.systemFont(ofSize: fontSize)
+        
+        let attributedString = NSAttributedString(
+            string: flag,
+            attributes: [.kern: -3]
+        )
+        flagLabel.attributedText = attributedString
+
+        flagLabel.accessibilityLabel = NSLocalizedString(
             "PhoneNumberKit.CountryCodePickerEntryButton.AccessibilityLabel",
             value: "Select your country code",
             comment: "Accessibility Label for Country Code Picker button")
+        flagGestureRecognizerStackView.addArrangedSubview(flagLabel)
+        
+        if let countryCode = utility.countryCode(for: currentRegion)?.description {
+            let countryCodeLabel = UILabel()
+            countryCodeLabel.text = "+\(countryCode)"
+            countryCodeLabel.font = UIFont.systemFont(ofSize: 16)
+            countryCodeLabel.textColor = UIColor(red: 78/255, green: 79/255, blue: 95/255, alpha: 1)
+            flagGestureRecognizerStackView.addArrangedSubview(countryCodeLabel)
+        }
+        
+        if #available(iOS 13.0, *) {
+            let chevronImageView = UIImageView(image: UIImage(systemName: "chevron.down"))
+            chevronImageView.contentMode = .scaleAspectFit
+            chevronImageView.translatesAutoresizingMaskIntoConstraints = false
+            chevronImageView.heightAnchor.constraint(equalToConstant: 16).isActive = true
+            chevronImageView.widthAnchor.constraint(equalToConstant: 16).isActive = true
+            flagGestureRecognizerStackView.addArrangedSubview(chevronImageView)
+        }
 
         if let countryName = Locale.autoupdatingCurrent.localizedString(forRegionCode: self.currentRegion) {
             let selectedFormat = NSLocalizedString(
                 "PhoneNumberKit.CountryCodePickerEntryButton.AccessibilityHint",
                 value: "%@ selected",
                 comment: "Accessiblity hint for currently selected country code")
-            self.flagButton.accessibilityHint = String(format: selectedFormat, countryName)
+            self.flagGestureRecognizerStackView.accessibilityHint = String(format: selectedFormat, countryName)
         }
-        let fontSize = (font ?? UIFont.preferredFont(forTextStyle: .body)).pointSize
-        self.flagButton.titleLabel?.font = UIFont.systemFont(ofSize: fontSize)
     }
 
     open func updatePlaceholder() {
